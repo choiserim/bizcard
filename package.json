@@ -1,0 +1,13 @@
+{
+  "name": "bizcard-manager",
+  "version": "1.0.0",
+  "description": "휴대폰으로 명함을 찍어 자동 인식·저장하는 웹 앱 (가입·API 키 불필요)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=16"
+  },
+  "private": true
+}

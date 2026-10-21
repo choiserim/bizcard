@@ -1,0 +1,633 @@
+<title>명함 매니저</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+  /* Layout: 상단 도구 막대 + 실물 명함 비율을 닮은 타일 그리드, 작업은 모두 오버레이 패널에서 */
+  :root {
+    --bg: #f1f3f6;
+    --surface: #ffffff;
+    --surface-2: #e9edf3;
+    --line: #d5dbe4;
+    --fg: #17202b;
+    --muted: #5b6676;
+    --accent: #1f4fd1;
+    --accent-fg: #ffffff;
+    --accent-soft: #e2e9fb;
+    --danger: #b42323;
+    --danger-soft: #fae6e6;
+    --ok: #1d7347;
+    --scrim: rgba(14, 20, 30, 0.58);
+    --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 6px 20px rgba(16, 24, 40, 0.07);
+    --font-body: "IBM Plex Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+    --r: 12px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1218; --surface: #161b23; --surface-2: #1d242f; --line: #2a3240;
+      --fg: #e6eaf0; --muted: #98a3b3; --accent: #7fa3ff; --accent-fg: #0a1020;
+      --accent-soft: #1b2744; --danger: #f08a8a; --danger-soft: #3a1d20; --ok: #62c597;
+      --scrim: rgba(0, 0, 0, 0.66); --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1218; --surface: #161b23; --surface-2: #1d242f; --line: #2a3240;
+    --fg: #e6eaf0; --muted: #98a3b3; --accent: #7fa3ff; --accent-fg: #0a1020;
+    --accent-soft: #1b2744; --danger: #f08a8a; --danger-soft: #3a1d20; --ok: #62c597;
+    --scrim: rgba(0, 0, 0, 0.66); --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-body);
+    font-size: 15px;
+    line-height: 1.55;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: 28px 64px;
+  }
+  body.locked { overflow: hidden; }
+  .wrap { max-width: 1080px; margin: 0 auto; display: grid; gap: 20px; }
+
+  button, input, textarea { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .ico { width: 18px; height: 18px; flex: none; }
+
+  /* Header */
+  .head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 24px; }
+  .head h1 { margin: 0; font-size: 28px; font-weight: 700; letter-spacing: -0.02em; text-wrap: balance; display: flex; align-items: center; gap: 10px; }
+  .head h1 .ico { width: 28px; height: 28px; color: var(--accent); }
+  .head p { margin: 4px 0 0; color: var(--muted); }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 12.5px; font-weight: 500; }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .badge.cloud .dot { background: var(--ok); }
+
+  /* Toolbar */
+  .tools { display: flex; flex-wrap: wrap; gap: 8px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    min-height: 44px; padding: 0 16px; border-radius: 10px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--surface); font-weight: 600; font-size: 14.5px;
+  }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { background: var(--danger); border-color: var(--danger); color: var(--surface); }
+  .btn.ghost { border-color: transparent; background: transparent; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .tools .sep { flex: 1; }
+  .cam-hint { display: none; }
+  @media (max-width: 640px) { .cam-hint { display: block; flex: 1 1 100%; margin: -2px 0 2px; text-align: center; } }
+  @media (max-width: 640px) {
+    .tools .btn.primary { flex: 1 1 100%; min-height: 52px; font-size: 16px; }
+    .tools .sep { display: none; }
+    .tools .btn:not(.primary) { flex: 1 1 calc(50% - 4px); }
+  }
+
+  /* Search */
+  .search { position: relative; }
+  .search .ico { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: var(--muted); }
+  .search input {
+    width: 100%; min-height: 48px; padding: 0 44px; border-radius: 10px;
+    border: 1px solid var(--line); background: var(--surface); font-size: 15.5px;
+  }
+  .search input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .search .clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); min-height: 36px; padding: 0 8px; }
+
+  /* Card grid: 각 타일은 실물 명함(90×50mm) 구성을 따른다 — 회사명 위, 이름 가운데, 연락처 아래 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 14px; }
+  .bcard {
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+    box-shadow: var(--shadow); padding: 16px 18px 12px; display: grid; gap: 10px; min-width: 0;
+  }
+  .bcard .co { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; min-height: 18px; overflow-wrap: anywhere; }
+  .bcard .nm { font-size: 21px; font-weight: 700; letter-spacing: -0.01em; line-height: 1.25; overflow-wrap: anywhere; }
+  .bcard .pos { font-size: 13.5px; color: var(--muted); font-weight: 500; margin-top: 2px; }
+  .bcard .lines { display: grid; gap: 4px; border-top: 1px dashed var(--line); padding-top: 10px; }
+  .line { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 14px; }
+  .line .ico { width: 15px; height: 15px; color: var(--muted); }
+  .line .val { flex: 1; min-width: 0; overflow-wrap: anywhere; user-select: text; }
+  .line .val.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 13.5px; }
+  .line a { color: var(--accent); text-decoration: none; }
+  .line a:hover { text-decoration: underline; }
+  .mini { min-height: 32px; min-width: 32px; padding: 0 6px; border: 0; background: transparent; border-radius: 8px; cursor: pointer; color: var(--muted); display: inline-flex; align-items: center; justify-content: center; }
+  .mini:hover { background: var(--surface-2); color: var(--fg); }
+  .mini .ico { width: 16px; height: 16px; }
+  .memo { font-size: 13px; color: var(--muted); white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .bcard .acts { display: flex; justify-content: flex-end; gap: 2px; margin-top: -2px; }
+  .mini.del:hover { color: var(--danger); background: var(--danger-soft); }
+
+  /* Empty state */
+  .empty { background: var(--surface); border: 1px dashed var(--line); border-radius: var(--r); padding: 40px 20px; text-align: center; display: grid; gap: 10px; justify-items: center; }
+  .empty .ico { width: 36px; height: 36px; color: var(--accent); }
+  .empty h2 { margin: 0; font-size: 18px; }
+  .empty p { margin: 0; color: var(--muted); max-width: 40ch; }
+
+  /* Overlays */
+  .overlay {
+    position: fixed; inset: 0; z-index: 50; background: var(--scrim);
+    display: flex; align-items: center; justify-content: center;
+    padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));
+  }
+  .panel { background: var(--surface); border-radius: 16px; width: 100%; max-width: 520px; max-height: 100%; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.25); }
+  .panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+  .panel header h2 { margin: 0; font-size: 19px; }
+  .panel .body { padding: 18px 20px; overflow-y: auto; display: grid; gap: 14px; }
+  .panel footer { display: flex; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--line); }
+  .panel footer .btn { flex: 1; }
+  .field { display: grid; gap: 6px; }
+  .field label { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 0.02em; }
+  .field input, .field textarea {
+    width: 100%; padding: 11px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); font-size: 15.5px;
+  }
+  .field input:focus, .field textarea:focus { outline: none; border-color: var(--accent); background: var(--surface); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field textarea { min-height: 96px; resize: vertical; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 420px) { .row2 { grid-template-columns: 1fr; } }
+  .preview { position: relative; border-radius: 10px; overflow: hidden; background: var(--surface-2); }
+  .preview img { display: block; width: 100%; max-height: 180px; object-fit: contain; }
+  .preview span { position: absolute; left: 8px; bottom: 8px; font-size: 12px; font-weight: 600; padding: 3px 8px; border-radius: 6px; background: var(--surface); color: var(--fg); display: inline-flex; gap: 5px; align-items: center; }
+  .preview span .ico { width: 13px; height: 13px; color: var(--accent); }
+  .note { font-size: 13px; color: var(--muted); margin: 0; }
+
+  /* Scan (분석 중) */
+  .scan { max-width: 420px; padding: 20px; gap: 16px; display: grid; text-align: center; }
+  .scan .shot { position: relative; border-radius: 10px; overflow: hidden; background: var(--surface-2); }
+  .scan .shot img { display: block; width: 100%; max-height: 46vh; object-fit: contain; }
+  .scanline { position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--accent); box-shadow: 0 0 14px 2px var(--accent); animation: scan 1.8s ease-in-out infinite alternate; }
+  @keyframes scan { from { top: 0; } to { top: calc(100% - 3px); } }
+  @media (prefers-reduced-motion: reduce) { .scanline { animation: none; top: 50%; } }
+  .scan h2 { margin: 0; font-size: 18px; }
+  .scan p { margin: 0; color: var(--muted); font-size: 14px; }
+
+  /* Toast */
+  .toasts { position: fixed; z-index: 80; left: 50%; transform: translateX(-50%); bottom: calc(20px + env(safe-area-inset-bottom, 0px)); display: grid; gap: 8px; width: min(92vw, 420px); }
+  .toast { background: var(--fg); color: var(--bg); padding: 12px 16px; border-radius: 10px; font-weight: 500; font-size: 14.5px; display: flex; gap: 10px; align-items: center; box-shadow: var(--shadow); transition: opacity 0.3s; }
+  .toast.err { background: var(--danger); color: var(--surface); }
+  .vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+
+<script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1><i data-lucide="contact-round" class="ico"></i>명함 매니저</h1>
+      <p id="count">명함을 불러오는 중입니다.</p>
+    </div>
+    <span id="store-badge" class="badge"><span class="dot"></span><span id="store-text">연결 중</span></span>
+  </div>
+
+  <div class="tools">
+    <!-- capture="environment": 휴대폰에서 기본 카메라 앱(후면)을 바로 엽니다 -->
+    <!-- accept는 반드시 image/* 여야 안드로이드가 파일 선택 창 대신 카메라를 바로 연다 -->
+    <input type="file" id="in-camera" class="vh" accept="image/*" capture="environment">
+    <input type="file" id="in-gallery" class="vh" accept="image/*">
+    <input type="file" id="in-csv" class="vh" accept=".csv,text/csv">
+
+    <button class="btn primary" id="btn-camera"><i data-lucide="camera" class="ico"></i>명함 촬영 (AI 인식)</button>
+    <p class="note cam-hint">선택 창이 뜨면 <b>카메라</b>(또는 사진 찍기)를 고르세요.</p>
+    <button class="btn" id="btn-gallery"><i data-lucide="image" class="ico"></i>사진 선택</button>
+    <button class="btn" id="btn-add"><i data-lucide="user-plus" class="ico"></i>직접 입력</button>
+    <span class="sep"></span>
+    <button class="btn" id="btn-import"><i data-lucide="upload" class="ico"></i>CSV 가져오기</button>
+    <button class="btn" id="btn-export"><i data-lucide="download" class="ico"></i>CSV 저장</button>
+  </div>
+
+  <div class="search">
+    <i data-lucide="search" class="ico"></i>
+    <label for="q" class="vh">검색</label>
+    <input id="q" type="search" placeholder="이름, 회사, 전화번호, 메모로 검색" autocomplete="off">
+    <button class="btn ghost clear" id="q-clear" hidden aria-label="검색어 지우기"><i data-lucide="x" class="ico"></i></button>
+  </div>
+
+  <div id="list"></div>
+</div>
+
+<!-- 추가/수정 -->
+<div class="overlay" id="ov-form" hidden>
+  <form class="panel" id="form" novalidate>
+    <header>
+      <h2 id="form-title">새 명함</h2>
+      <button type="button" class="mini" data-close aria-label="닫기"><i data-lucide="x" class="ico"></i></button>
+    </header>
+    <div class="body">
+      <div class="preview" id="form-preview" hidden>
+        <img id="form-preview-img" alt="인식한 명함 사진">
+        <span><i data-lucide="sparkles" class="ico"></i>AI가 읽은 사진 · 내용을 확인하세요</span>
+      </div>
+      <div class="field">
+        <label for="f-name">이름 *</label>
+        <input id="f-name" required autocomplete="off" placeholder="홍길동">
+      </div>
+      <div class="row2">
+        <div class="field"><label for="f-company">회사</label><input id="f-company" autocomplete="off" placeholder="(주)캠텍"></div>
+        <div class="field"><label for="f-position">직함</label><input id="f-position" autocomplete="off" placeholder="영업팀 과장"></div>
+      </div>
+      <div class="field"><label for="f-phone">전화번호</label><input id="f-phone" type="tel" inputmode="tel" autocomplete="off" placeholder="010-0000-0000"></div>
+      <div class="field"><label for="f-email">이메일</label><input id="f-email" type="email" inputmode="email" autocomplete="off" placeholder="name@company.co.kr"></div>
+      <div class="field"><label for="f-memo">메모</label><textarea id="f-memo" placeholder="사무실 번호, 주소, 만난 곳 등"></textarea></div>
+      <p class="note" id="form-error" hidden></p>
+    </div>
+    <footer>
+      <button type="button" class="btn" data-close>취소</button>
+      <button type="submit" class="btn primary" id="form-submit"><i data-lucide="check" class="ico"></i>저장</button>
+    </footer>
+  </form>
+</div>
+
+<!-- AI 분석 중 -->
+<div class="overlay" id="ov-scan" hidden>
+  <div class="panel scan" role="status" aria-live="polite">
+    <div class="shot"><img id="scan-img" alt="촬영한 명함"><div class="scanline"></div></div>
+    <h2>명함을 읽는 중입니다</h2>
+    <p id="scan-msg">이름, 회사, 연락처를 찾고 있습니다. 보통 몇 초 걸립니다.</p>
+    <button class="btn" id="scan-cancel">취소</button>
+  </div>
+</div>
+
+<!-- 삭제 확인 -->
+<div class="overlay" id="ov-del" hidden>
+  <div class="panel" role="alertdialog" aria-labelledby="del-title">
+    <header><h2 id="del-title">명함 삭제</h2></header>
+    <div class="body"><p style="margin:0"><strong id="del-name"></strong> 님의 명함을 삭제합니다. 삭제하면 되돌릴 수 없습니다.</p></div>
+    <footer>
+      <button class="btn" data-close>취소</button>
+      <button class="btn danger" id="del-ok"><i data-lucide="trash-2" class="ico"></i>삭제</button>
+    </footer>
+  </div>
+</div>
+
+<div class="toasts" id="toasts" aria-live="polite"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const icons = () => { try { window.lucide && lucide.createIcons(); } catch (e) {} };
+  const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const telOf = (p) => String(p || '').replace(/[^\d+]/g, '');
+  const FIELDS = ['name', 'company', 'position', 'phone', 'email', 'memo'];
+  const LOCAL_KEY = 'bizcard-manager-v1';
+
+  let cards = [];
+  let query = '';
+  let mode = 'pending';   // 'cloud' | 'local'
+  let col = null;         // db collection (cloud)
+  let editingId = null;
+  let deleteId = null;
+  let scanCtl = null;
+  let previewUrl = null;
+
+  const cap = (name) => (window.claude && claude.use) ? claude.use(name).catch(() => null) : Promise.resolve(null);
+  const sampleP = cap('sample');
+  const downloadsP = cap('downloads');
+
+  // ---------- toast ----------
+  function toast(msg, err = false) {
+    const t = document.createElement('div');
+    t.className = 'toast' + (err ? ' err' : '');
+    t.textContent = msg;
+    $('toasts').appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3600);
+  }
+
+  // ---------- overlays ----------
+  function show(id) { $(id).hidden = false; document.body.classList.add('locked'); icons(); }
+  function hide(id) {
+    $(id).hidden = true;
+    if (![...document.querySelectorAll('.overlay')].some((o) => !o.hidden)) document.body.classList.remove('locked');
+  }
+  document.querySelectorAll('[data-close]').forEach((b) => b.addEventListener('click', () => hide(b.closest('.overlay').id)));
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!$('ov-del').hidden) hide('ov-del');
+    else if (!$('ov-form').hidden) hide('ov-form');
+  });
+
+  // ---------- storage ----------
+  function loadLocal() { try { return JSON.parse(localStorage.getItem(LOCAL_KEY)) || []; } catch (e) { return []; } }
+  function saveLocal() { try { localStorage.setItem(LOCAL_KEY, JSON.stringify(cards)); } catch (e) { toast('이 브라우저에 저장하지 못했습니다.', true); } }
+
+  function setBadge() {
+    $('store-badge').classList.toggle('cloud', mode === 'cloud');
+    $('store-text').textContent = mode === 'cloud' ? '내 계정에 저장 · 다른 기기에서도 보임' : '이 브라우저에만 저장';
+  }
+
+  async function boot() {
+    render();
+    const [db, user] = await Promise.all([cap('db'), cap('user')]);
+    const uid = user ? await user.id().catch(() => null) : null;
+    if (db && uid) {
+      mode = 'cloud';
+      col = db.collection('data/users/' + uid);
+      col.onSnapshot((snap) => {
+        cards = snap.docs.map((d) => ({ ...d.data(), id: d.id }));
+        render();
+      }, () => {
+        mode = 'local'; cards = loadLocal(); setBadge(); render();
+        toast('계정 저장소 연결이 끊겨 이 브라우저 저장으로 전환했습니다.', true);
+      });
+    } else {
+      mode = 'local';
+      cards = loadLocal();
+      render();
+    }
+    setBadge();
+  }
+
+  function dbErrorText(e) {
+    if (e && e.code === 'invalid_argument') return '이 링크로는 명함을 저장할 권한이 없습니다.';
+    if (e && e.code === 'quota_exceeded') return '저장 공간이 가득 찼습니다. 오래된 명함을 정리해 주세요.';
+    return '저장하지 못했습니다. 잠시 후 다시 시도해 주세요.';
+  }
+
+  async function addCard(data) {
+    if (mode === 'cloud') { await col.add(data); return; }
+    cards.push({ ...data, id: Date.now().toString(36) + Math.random().toString(36).slice(2, 7) });
+    saveLocal(); render();
+  }
+  async function updateCard(id, data) {
+    if (mode === 'cloud') { await col.doc(id).update(data); return; }
+    cards = cards.map((c) => (c.id === id ? { ...c, ...data } : c));
+    saveLocal(); render();
+  }
+  async function removeCard(id) {
+    if (mode === 'cloud') { await col.doc(id).delete(); return; }
+    cards = cards.filter((c) => c.id !== id);
+    saveLocal(); render();
+  }
+
+  // ---------- render ----------
+  function render() {
+    const list = $('list');
+    const q = query.trim().toLowerCase();
+    const shown = cards
+      .filter((c) => !q || FIELDS.some((f) => String(c[f] || '').toLowerCase().includes(q)))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+    $('count').textContent = mode === 'pending' ? '명함을 불러오는 중입니다.'
+      : q ? `전체 ${cards.length}장 중 ${shown.length}장이 검색되었습니다.`
+      : `명함 ${cards.length}장`;
+
+    if (!cards.length && mode !== 'pending') {
+      list.innerHTML = `<div class="empty">
+        <i data-lucide="scan-line" class="ico"></i>
+        <h2>아직 저장된 명함이 없습니다</h2>
+        <p>휴대폰으로 <b>명함 촬영</b>을 누르면 카메라가 열리고, AI가 이름·회사·연락처를 읽어 입력해 줍니다. 직접 입력하거나 CSV로 한 번에 가져올 수도 있습니다.</p>
+      </div>`;
+      icons(); return;
+    }
+    if (!shown.length) {
+      list.innerHTML = cards.length ? `<div class="empty"><i data-lucide="search-x" class="ico"></i><h2>검색 결과가 없습니다</h2><p>다른 이름이나 회사명으로 검색해 보세요.</p></div>` : '';
+      icons(); return;
+    }
+
+    list.innerHTML = `<div class="grid">${shown.map((c) => {
+      const tel = telOf(c.phone);
+      return `<article class="bcard" data-id="${esc(c.id)}">
+        <div class="co">${esc(c.company) || '&nbsp;'}</div>
+        <div><div class="nm">${esc(c.name)}</div>${c.position ? `<div class="pos">${esc(c.position)}</div>` : ''}</div>
+        <div class="lines">
+          <div class="line"><i data-lucide="phone" class="ico"></i>
+            <span class="val mono">${tel ? `<a href="tel:${esc(tel)}">${esc(c.phone)}</a>` : '<span style="color:var(--muted)">-</span>'}</span>
+            ${tel ? `<button class="mini" data-act="copy" data-text="${esc(c.phone)}" aria-label="전화번호 복사"><i data-lucide="copy" class="ico"></i></button>` : ''}
+          </div>
+          <div class="line"><i data-lucide="mail" class="ico"></i>
+            <span class="val">${c.email ? `<a href="mailto:${esc(c.email)}">${esc(c.email)}</a>` : '<span style="color:var(--muted)">-</span>'}</span>
+            ${c.email ? `<button class="mini" data-act="copy" data-text="${esc(c.email)}" aria-label="이메일 복사"><i data-lucide="copy" class="ico"></i></button>` : ''}
+          </div>
+        </div>
+        ${c.memo ? `<div class="memo">${esc(c.memo)}</div>` : ''}
+        <div class="acts">
+          <button class="mini" data-act="copyall" aria-label="연락처 전체 복사" title="연락처 전체 복사"><i data-lucide="clipboard-list" class="ico"></i></button>
+          <button class="mini" data-act="edit" aria-label="수정" title="수정"><i data-lucide="pencil" class="ico"></i></button>
+          <button class="mini del" data-act="del" aria-label="삭제" title="삭제"><i data-lucide="trash-2" class="ico"></i></button>
+        </div>
+      </article>`;
+    }).join('')}</div>`;
+    icons();
+  }
+
+  // ---------- copy ----------
+  function copy(text) {
+    const done = () => toast('복사했습니다.');
+    const fallback = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+      ta.remove();
+      ok ? done() : toast('복사하지 못했습니다. 길게 눌러 직접 선택해 주세요.', true);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, fallback);
+    else fallback();
+  }
+
+  $('list').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const id = b.closest('.bcard').dataset.id;
+    const c = cards.find((x) => x.id === id);
+    if (!c) return;
+    const act = b.dataset.act;
+    if (act === 'copy') copy(b.dataset.text);
+    if (act === 'copyall') copy([c.name, [c.company, c.position].filter(Boolean).join(' '), c.phone, c.email, c.memo].filter(Boolean).join('\n'));
+    if (act === 'edit') openForm(c);
+    if (act === 'del') { deleteId = id; $('del-name').textContent = c.name; show('ov-del'); }
+  });
+
+  $('del-ok').addEventListener('click', async () => {
+    const id = deleteId; hide('ov-del');
+    try { await removeCard(id); toast('삭제했습니다.'); } catch (e) { toast(dbErrorText(e), true); }
+  });
+
+  // ---------- form ----------
+  function openForm(card = null, scanned = null, imgUrl = null) {
+    editingId = card ? card.id : null;
+    const src = card || scanned || {};
+    FIELDS.forEach((f) => { $('f-' + f).value = src[f] || ''; });
+    $('form-title').textContent = card ? '명함 수정' : scanned ? 'AI가 읽은 명함' : '새 명함';
+    $('form-preview').hidden = !imgUrl;
+    if (imgUrl) $('form-preview-img').src = imgUrl;
+    $('form-error').hidden = true;
+    show('ov-form');
+    setTimeout(() => $('f-name').focus(), 50);
+  }
+
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const data = {};
+    FIELDS.forEach((f) => { data[f] = $('f-' + f).value.trim(); });
+    if (!data.name) {
+      $('form-error').textContent = '이름을 입력해 주세요.';
+      $('form-error').hidden = false; $('f-name').focus(); return;
+    }
+    data.updatedAt = Date.now();
+    $('form-submit').disabled = true;
+    try {
+      if (editingId) await updateCard(editingId, data);
+      else await addCard({ ...data, createdAt: Date.now() });
+      hide('ov-form');
+      toast(editingId ? '수정했습니다.' : '저장했습니다.');
+    } catch (err) {
+      $('form-error').textContent = dbErrorText(err);
+      $('form-error').hidden = false;
+    } finally {
+      $('form-submit').disabled = false;
+    }
+  });
+
+  // ---------- AI scan ----------
+  const SAMPLE_ERR = {
+    not_granted: 'Claude 사용을 허용해야 AI 인식을 쓸 수 있습니다. 직접 입력으로 추가해 주세요.',
+    sampling_disabled: '이 계정에서는 AI 인식을 쓸 수 없습니다. 직접 입력으로 추가해 주세요.',
+    images_unavailable: '이 화면에서는 사진을 AI로 보낼 수 없습니다. 직접 입력으로 추가해 주세요.',
+    image_rejected: '사진을 읽을 수 없습니다. JPG나 PNG로 다시 찍어 주세요.',
+    rate_limited: '요청이 많습니다. 잠시 후 다시 시도해 주세요.',
+    session_expired: 'claude.ai에 다시 로그인한 뒤 시도해 주세요.',
+    refused: '이 사진은 인식할 수 없습니다. 직접 입력해 주세요.',
+    invalid_json: '명함 내용을 정리하지 못했습니다. 다시 시도해 주세요.',
+    empty_completion: '명함 글자를 찾지 못했습니다. 밝은 곳에서 정면으로 다시 찍어 주세요.'
+  };
+
+  const PROMPT = `첨부한 이미지는 명함 사진입니다. 명함에 적힌 정보를 읽어 아래 형식의 JSON 객체 하나로만 답하세요.
+{"name":"","company":"","position":"","phone":"","email":"","memo":""}
+규칙:
+- 글자는 명함에 적힌 그대로 쓰고 한국어는 한국어로 둡니다.
+- phone에는 휴대폰 번호를 우선 넣고, 없으면 대표 번호 하나를 넣습니다.
+- 사무실 번호, 팩스, 주소, 웹사이트 등 나머지 정보는 memo에 한 줄씩 넣습니다.
+- 없는 값은 빈 문자열로 둡니다. 명함이 아니면 모든 값을 빈 문자열로 둡니다.`;
+
+  // 휴대폰 사진(HEIC 포함, 수 MB)을 AI가 받는 JPEG로 바꾸고 크기를 줄인다
+  async function toJpeg(file, maxSide = 2000) {
+    const url = URL.createObjectURL(file);
+    try {
+      const img = new Image();
+      await new Promise((ok, fail) => { img.onload = ok; img.onerror = fail; img.src = url; });
+      const s = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+      const cv = document.createElement('canvas');
+      cv.width = Math.round(img.naturalWidth * s);
+      cv.height = Math.round(img.naturalHeight * s);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      const blob = await new Promise((ok) => cv.toBlob(ok, 'image/jpeg', 0.88));
+      return blob || file;
+    } catch (e) {
+      return file; // 브라우저가 못 여는 형식이면 원본 그대로 보내 본다
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  async function analyze(original) {
+    if (!original) return;
+    const file = await toJpeg(original);
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(file);
+    $('scan-img').src = previewUrl;
+    $('scan-msg').textContent = '이름, 회사, 연락처를 찾고 있습니다. 처음 한 번은 Claude 사용 허용 창이 뜹니다.';
+    show('ov-scan');
+
+    const sample = await sampleP;
+    if (!sample) {
+      hide('ov-scan');
+      toast('AI 인식은 claude.ai에서 열었을 때만 동작합니다. 직접 입력해 주세요.', true);
+      openForm(null, {}, previewUrl);
+      return;
+    }
+
+    scanCtl = new AbortController();
+    try {
+      const out = await sample.json(PROMPT, { images: [file], modelTier: 'quick', signal: scanCtl.signal });
+      const data = {};
+      FIELDS.forEach((f) => { data[f] = typeof out?.[f] === 'string' ? out[f].trim() : ''; });
+      hide('ov-scan');
+      if (!FIELDS.some((f) => data[f])) toast('명함 글자를 찾지 못했습니다. 다시 찍거나 직접 입력해 주세요.', true);
+      else toast('인식했습니다. 내용을 확인하고 저장하세요.');
+      openForm(null, data, previewUrl);
+    } catch (e) {
+      hide('ov-scan');
+      if (e && e.code === 'cancelled') return;
+      toast(SAMPLE_ERR[e && e.code] || 'AI 인식 중 문제가 생겼습니다. 다시 시도해 주세요.', true);
+    } finally {
+      scanCtl = null;
+    }
+  }
+
+  $('scan-cancel').addEventListener('click', () => { scanCtl ? scanCtl.abort() : hide('ov-scan'); });
+  $('btn-camera').addEventListener('click', () => $('in-camera').click());
+  $('btn-gallery').addEventListener('click', () => $('in-gallery').click());
+  ['in-camera', 'in-gallery'].forEach((id) => $(id).addEventListener('change', (e) => {
+    const f = e.target.files[0]; e.target.value = ''; analyze(f);
+  }));
+  $('btn-add').addEventListener('click', () => openForm());
+
+  // ---------- search ----------
+  $('q').addEventListener('input', () => { query = $('q').value; $('q-clear').hidden = !query; render(); });
+  $('q-clear').addEventListener('click', () => { $('q').value = ''; query = ''; $('q-clear').hidden = true; render(); $('q').focus(); });
+
+  // ---------- CSV ----------
+  function parseCSV(text) {
+    const rows = []; let row = [], cell = '', q = false;
+    text = text.replace(/^﻿/, '');
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (q) {
+        if (ch === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+        else if (ch === '"') q = false;
+        else cell += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r') {
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); rows.push(row); row = []; cell = '';
+      } else cell += ch;
+    }
+    if (cell || row.length) { row.push(cell); rows.push(row); }
+    return rows.filter((r) => r.some((v) => v.trim()));
+  }
+
+  $('btn-import').addEventListener('click', () => $('in-csv').click());
+  $('in-csv').addEventListener('change', (e) => {
+    const file = e.target.files[0]; e.target.value = '';
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const rows = parseCSV(String(reader.result));
+      let ok = 0, fail = 0;
+      for (let i = 1; i < rows.length; i++) {
+        const v = rows[i].map((x) => x.trim());
+        if (!v[0]) continue;
+        const data = {}; FIELDS.forEach((f, k) => { data[f] = v[k] || ''; });
+        try { await addCard({ ...data, createdAt: Date.now() - i, updatedAt: Date.now() }); ok++; } catch (err) { fail++; }
+      }
+      toast(fail ? `${ok}장을 가져오고 ${fail}장은 실패했습니다.` : `${ok}장을 가져왔습니다.`, !!fail);
+    };
+    reader.readAsText(file, 'utf-8');
+  });
+
+  $('btn-export').addEventListener('click', async () => {
+    if (!cards.length) { toast('저장할 명함이 없습니다.', true); return; }
+    const q = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = '﻿' + ['이름', '회사', '직함', '전화번호', '이메일', '메모'].join(',') + '\r\n'
+      + cards.map((c) => FIELDS.map((f) => q(c[f])).join(',')).join('\r\n');
+    const downloads = await downloadsP;
+    if (!downloads) { toast('이 화면에서는 파일 저장을 쓸 수 없습니다.', true); return; }
+    try {
+      await downloads.save({ filename: `명함_${new Date().toISOString().slice(0, 10)}.csv`, data: csv });
+      toast('CSV 파일을 저장했습니다. 엑셀에서 열 수 있습니다.');
+    } catch (e) {
+      if (e && e.code !== 'declined') toast('파일을 저장하지 못했습니다.', true);
+    }
+  });
+
+  icons();
+  boot();
+})();
+</script>
